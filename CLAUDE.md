@@ -59,3 +59,16 @@ jobs.json              # Scraper output (intermediate, gitignored)
   will only keep jobs whose scraped company name contains (or is contained by) one of the listed names —
   case-insensitive substring match. Set to `[]` to scrape all companies (default, no filter).
   Example: `"targeted_companies": ["Google", "Microsoft", "Thoughtworks"]`
+- `job_freshness` controls how recently jobs must have been posted. Mapped to LinkedIn's `f_TPR` URL parameter.
+  Default: `"24h"`. Valid values:
+
+  | Value | Meaning |
+  |-------|---------|
+  | `"1h"` | Last hour |
+  | `"24h"` / `"1day"` | Last 24 hours (default) |
+  | `"1week"` / `"7days"` | Last 7 days |
+  | `"2weeks"` / `"14days"` | Last 14 days |
+  | `"1month"` / `"30days"` | Last 30 days |
+  | `"any"` | No time filter — all jobs |
+
+  Unknown values fall back to `"24h"` with a printed warning.

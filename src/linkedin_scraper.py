@@ -16,8 +16,8 @@ from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
 
-# Mapping from job_freshness config values to LinkedIn f_TPR parameter values
-_FRESHNESS_MAP = {
+# LinkedIn f_TPR parameter values for job freshness filtering
+FRESHNESS_MAP: dict[str, str] = {
     "1h": "r3600",
     "24h": "r86400",
     "1day": "r86400",
@@ -27,22 +27,24 @@ _FRESHNESS_MAP = {
     "14days": "r1209600",
     "1month": "r2592000",
     "30days": "r2592000",
-    "any": "",
+    "any": "",  # no time filter
 }
 
-# Human-readable labels for search term display
-_FRESHNESS_LABEL = {
-    "1h": "1 hour",
-    "24h": "24 hours",
-    "1day": "24 hours",
-    "1week": "1 week",
-    "7days": "7 days",
-    "2weeks": "2 weeks",
-    "14days": "14 days",
-    "1month": "1 month",
-    "30days": "30 days",
-    "any": "any time",
-}
+
+def _resolve_freshness(value: str) -> str:
+    """Return the LinkedIn f_TPR query-string value for the given config string.
+
+    Falls back to '24h' with a warning if the value is unrecognised.
+    Pass 'any' to disable the time filter entirely.
+    """
+    key = value.lower().strip()
+    if key not in FRESHNESS_MAP:
+        valid = ", ".join(FRESHNESS_MAP.keys())
+        print(
+            f"  [warn] Unknown job_freshness '{value}'. Valid options: {valid}. Falling back to '24h'."
+        )
+        return FRESHNESS_MAP["24h"]
+    return FRESHNESS_MAP[key]
 
 
 def _matches_targeted_companies(company: str, targeted: list[str]) -> bool:
@@ -59,9 +61,15 @@ async def _scrape(config: dict, email: str, password: str) -> list:
     jobs = []
     max_jobs = config.get("max_jobs_to_scrape", 20)
     targeted_companies: list[str] = config.get("targeted_companies", [])
+    freshness_raw: str = config.get("job_freshness", "24h")
+    freshness_param: str = _resolve_freshness(freshness_raw)
 
     if targeted_companies:
         print(f"  [filter] Targeting companies: {targeted_companies}")
+    freshness_label = (
+        freshness_raw if freshness_raw.lower() != "any" else "any (no time limit)"
+    )
+    print(f"  [filter] Job freshness: {freshness_label}")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -108,32 +116,21 @@ async def _scrape(config: dict, email: str, password: str) -> list:
             titles = [titles]
         location = config.get("location", "Pune District")
 
-        # Resolve job_freshness config to LinkedIn's f_TPR value
-        freshness_key = config.get("job_freshness", "24h")
-        f_tpr = _FRESHNESS_MAP.get(freshness_key)
-        if f_tpr is None:
-            print(
-                f"  [warn] Unknown job_freshness '{freshness_key}', falling back to 24h"
-            )
-            freshness_key = "24h"
-            f_tpr = "r86400"
-        freshness_label = _FRESHNESS_LABEL.get(freshness_key, freshness_key)
+        freshness_qs = f"&f_TPR={freshness_param}" if freshness_param else ""
 
         collected = 0
         for title in titles:
             if collected >= max_jobs:
                 break
 
-            # Build search keywords: "{role} posted in last {timeframe}"
-            search_term = f"{title} posted in last {freshness_label}"
             search_url = (
                 f"https://www.linkedin.com/jobs/search/"
-                f"?keywords={search_term.replace(' ', '%20')}"
+                f"?keywords={title.replace(' ', '%20')}"
                 f"&location={location.replace(' ', '%20')}"
-                + (f"&f_TPR={f_tpr}" if f_tpr else "")
-                + "&sortBy=DD"
+                f"{freshness_qs}"
+                f"&sortBy=DD"
             )
-            print(f"  Searching: '{search_term}'")
+            print(f"  Searching: '{title}'")
             await page.goto(search_url, wait_until="domcontentloaded")
             await asyncio.sleep(3)
 
@@ -340,9 +337,11 @@ if __name__ == "__main__":
     if isinstance(titles, str):
         titles = [titles]
     targeted = config.get("targeted_companies", [])
+    freshness = config.get("job_freshness", "24h")
     print(f"Scraping LinkedIn for {titles} in '{config['location']}'...")
     if targeted:
         print(f"  Targeted companies filter: {targeted}")
+    print(f"  Job freshness: {freshness}")
     jobs = scrape_jobs(config, email, password)
 
     with open("jobs.json", "w", encoding="utf-8") as f:
