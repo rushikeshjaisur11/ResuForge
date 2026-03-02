@@ -1,0 +1,19 @@
+# Environment
+.env
+
+# Output
+resumes/
+jobs.json
+
+# Resume
+resume.docx
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Playwright
+playwright/.auth/
