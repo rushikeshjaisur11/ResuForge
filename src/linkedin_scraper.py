@@ -45,9 +45,23 @@ _FRESHNESS_LABEL = {
 }
 
 
+def _matches_targeted_companies(company: str, targeted: list[str]) -> bool:
+    """Return True if `company` matches any name in `targeted` (case-insensitive substring)."""
+    if not targeted:
+        return True  # No filter — accept all companies
+    company_lower = company.lower()
+    return any(
+        t.lower() in company_lower or company_lower in t.lower() for t in targeted
+    )
+
+
 async def _scrape(config: dict, email: str, password: str) -> list:
     jobs = []
     max_jobs = config.get("max_jobs_to_scrape", 20)
+    targeted_companies: list[str] = config.get("targeted_companies", [])
+
+    if targeted_companies:
+        print(f"  [filter] Targeting companies: {targeted_companies}")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -139,11 +153,18 @@ async def _scrape(config: dict, email: str, password: str) -> list:
                     try:
                         job = await _extract_job(page, card)
                         if job and not _is_duplicate(jobs, job["job_id"]):
-                            jobs.append(job)
-                            collected += 1
-                            print(
-                                f"  Scraped [{collected}/{max_jobs}]: {job['title']} @ {job['company']}"
-                            )
+                            if not _matches_targeted_companies(
+                                job["company"], targeted_companies
+                            ):
+                                print(
+                                    f"  [skip] '{job['company']}' not in targeted companies list"
+                                )
+                            else:
+                                jobs.append(job)
+                                collected += 1
+                                print(
+                                    f"  Scraped [{collected}/{max_jobs}]: {job['title']} @ {job['company']}"
+                                )
                     except Exception as e:
                         print(f"  [warn] Failed to extract job: {e}")
                     await _random_delay(0.5, 1.5)
@@ -318,7 +339,10 @@ if __name__ == "__main__":
     titles = config.get("job_titles", config.get("job_title", ""))
     if isinstance(titles, str):
         titles = [titles]
+    targeted = config.get("targeted_companies", [])
     print(f"Scraping LinkedIn for {titles} in '{config['location']}'...")
+    if targeted:
+        print(f"  Targeted companies filter: {targeted}")
     jobs = scrape_jobs(config, email, password)
 
     with open("jobs.json", "w", encoding="utf-8") as f:

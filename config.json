@@ -12,5 +12,6 @@
     "BigQuery"
   ],
   "max_jobs_to_scrape": 5,
-  "top_jobs_count": 5
+  "top_jobs_count": 5,
+  "targeted_companies": []
 }
