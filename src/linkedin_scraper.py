@@ -16,12 +16,43 @@ from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
 
+# Mapping from job_freshness config values to LinkedIn f_TPR parameter values
+_FRESHNESS_MAP = {
+    "1h": "r3600",
+    "24h": "r86400",
+    "1day": "r86400",
+    "1week": "r604800",
+    "7days": "r604800",
+    "2weeks": "r1209600",
+    "14days": "r1209600",
+    "1month": "r2592000",
+    "30days": "r2592000",
+    "any": "",
+}
+
+# Human-readable labels for search term display
+_FRESHNESS_LABEL = {
+    "1h": "1 hour",
+    "24h": "24 hours",
+    "1day": "24 hours",
+    "1week": "1 week",
+    "7days": "7 days",
+    "2weeks": "2 weeks",
+    "14days": "14 days",
+    "1month": "1 month",
+    "30days": "30 days",
+    "any": "any time",
+}
+
+
 async def _scrape(config: dict, email: str, password: str) -> list:
     jobs = []
     max_jobs = config.get("max_jobs_to_scrape", 20)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)  # visible so CAPTCHA can be handled
+        browser = await p.chromium.launch(
+            headless=False
+        )  # visible so CAPTCHA can be handled
         context = await browser.new_context()
         page = await context.new_page()
 
@@ -34,7 +65,9 @@ async def _scrape(config: dict, email: str, password: str) -> list:
         await page.click('button[type="submit"]')
 
         # Wait up to 60s for post-login navigation — user may need to solve CAPTCHA/verification
-        print("  Waiting for login... (solve any CAPTCHA/verification in the browser window)")
+        print(
+            "  Waiting for login... (solve any CAPTCHA/verification in the browser window)"
+        )
         try:
             await page.wait_for_url(
                 re.compile(r"linkedin\.com/(feed|jobs|checkpoint)"),
@@ -48,7 +81,9 @@ async def _scrape(config: dict, email: str, password: str) -> list:
 
         # If stuck on checkpoint/verification, give user time to solve it
         if "checkpoint" in current_url or "login" in current_url:
-            print("  Security check detected — please complete it in the browser. Waiting 30s...")
+            print(
+                "  Security check detected — please complete it in the browser. Waiting 30s..."
+            )
             await asyncio.sleep(30)
 
         await asyncio.sleep(3)
@@ -57,26 +92,41 @@ async def _scrape(config: dict, email: str, password: str) -> list:
         titles = config.get("job_titles", config.get("job_title", "Software Engineer"))
         if isinstance(titles, str):
             titles = [titles]
-        location = config.get("location", "United States")
+        location = config.get("location", "Pune District")
+
+        # Resolve job_freshness config to LinkedIn's f_TPR value
+        freshness_key = config.get("job_freshness", "24h")
+        f_tpr = _FRESHNESS_MAP.get(freshness_key)
+        if f_tpr is None:
+            print(
+                f"  [warn] Unknown job_freshness '{freshness_key}', falling back to 24h"
+            )
+            freshness_key = "24h"
+            f_tpr = "r86400"
+        freshness_label = _FRESHNESS_LABEL.get(freshness_key, freshness_key)
 
         collected = 0
         for title in titles:
             if collected >= max_jobs:
                 break
 
+            # Build search keywords: "{role} posted in last {timeframe}"
+            search_term = f"{title} posted in last {freshness_label}"
             search_url = (
                 f"https://www.linkedin.com/jobs/search/"
-                f"?keywords={title.replace(' ', '%20')}"
+                f"?keywords={search_term.replace(' ', '%20')}"
                 f"&location={location.replace(' ', '%20')}"
-                f"&f_TPR=r86400"  # last 24 hours
-                f"&sortBy=DD"
+                + (f"&f_TPR={f_tpr}" if f_tpr else "")
+                + "&sortBy=DD"
             )
-            print(f"  Searching: '{title}'")
+            print(f"  Searching: '{search_term}'")
             await page.goto(search_url, wait_until="domcontentloaded")
             await asyncio.sleep(3)
 
             while collected < max_jobs:
-                cards = await page.query_selector_all("li.jobs-search-results__list-item")
+                cards = await page.query_selector_all(
+                    "li.jobs-search-results__list-item"
+                )
                 if not cards:
                     cards = await page.query_selector_all("[data-job-id]")
                 if not cards:
@@ -91,7 +141,9 @@ async def _scrape(config: dict, email: str, password: str) -> list:
                         if job and not _is_duplicate(jobs, job["job_id"]):
                             jobs.append(job)
                             collected += 1
-                            print(f"  Scraped [{collected}/{max_jobs}]: {job['title']} @ {job['company']}")
+                            print(
+                                f"  Scraped [{collected}/{max_jobs}]: {job['title']} @ {job['company']}"
+                            )
                     except Exception as e:
                         print(f"  [warn] Failed to extract job: {e}")
                     await _random_delay(0.5, 1.5)
@@ -100,16 +152,22 @@ async def _scrape(config: dict, email: str, password: str) -> list:
                     break
 
                 # Try to load next page
-                next_btn = await page.query_selector('button[aria-label="View next page"]')
+                next_btn = await page.query_selector(
+                    'button[aria-label="View next page"]'
+                )
                 if next_btn:
                     await next_btn.click()
                     await asyncio.sleep(3)
                     await _random_delay()
                 else:
                     # Scroll to load more
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await page.evaluate(
+                        "window.scrollTo(0, document.body.scrollHeight)"
+                    )
                     await _random_delay(2, 3)
-                    new_cards = await page.query_selector_all("li.jobs-search-results__list-item")
+                    new_cards = await page.query_selector_all(
+                        "li.jobs-search-results__list-item"
+                    )
                     if len(new_cards) <= len(cards):
                         break  # no new jobs on this search
 
@@ -177,30 +235,39 @@ async def _extract_job(page, card) -> dict | None:
 
     # Fallback title/company from the detail panel
     if not title:
-        title = await _try_selectors(page, [
-            "h1.job-details-jobs-unified-top-card__job-title",
-            ".job-details-jobs-unified-top-card__job-title h1",
-            ".jobs-unified-top-card__job-title h1",
-            "h1.t-24",
-            ".artdeco-entity-lockup__title h1",
-        ])
+        title = await _try_selectors(
+            page,
+            [
+                "h1.job-details-jobs-unified-top-card__job-title",
+                ".job-details-jobs-unified-top-card__job-title h1",
+                ".jobs-unified-top-card__job-title h1",
+                "h1.t-24",
+                ".artdeco-entity-lockup__title h1",
+            ],
+        )
 
     if not company:
-        company = await _try_selectors(page, [
-            ".job-details-jobs-unified-top-card__company-name a",
-            ".job-details-jobs-unified-top-card__company-name",
-            ".jobs-unified-top-card__company-name a",
-            ".jobs-unified-top-card__company-name",
-            "a[data-tracking-control-name='public_jobs_topcard-org-name']",
-        ])
+        company = await _try_selectors(
+            page,
+            [
+                ".job-details-jobs-unified-top-card__company-name a",
+                ".job-details-jobs-unified-top-card__company-name",
+                ".jobs-unified-top-card__company-name a",
+                ".jobs-unified-top-card__company-name",
+                "a[data-tracking-control-name='public_jobs_topcard-org-name']",
+            ],
+        )
 
     # Job description
-    jd_text = await _try_selectors(page, [
-        ".jobs-description__content",
-        ".jobs-description",
-        "#job-details",
-        ".job-details-jobs-unified-top-card__primary-description-container",
-    ])
+    jd_text = await _try_selectors(
+        page,
+        [
+            ".jobs-description__content",
+            ".jobs-description",
+            "#job-details",
+            ".job-details-jobs-unified-top-card__primary-description-container",
+        ],
+    )
 
     return {
         "job_id": job_id.strip(),
@@ -241,7 +308,9 @@ if __name__ == "__main__":
     email = os.getenv("LINKEDIN_EMAIL", "")
     password = os.getenv("LINKEDIN_PASSWORD", "")
     if not email or not password:
-        raise SystemExit("[error] LINKEDIN_EMAIL and LINKEDIN_PASSWORD must be set in .env")
+        raise SystemExit(
+            "[error] LINKEDIN_EMAIL and LINKEDIN_PASSWORD must be set in .env"
+        )
 
     with open("config.json", encoding="utf-8") as f:
         config = json.load(f)
