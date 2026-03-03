@@ -1,5 +1,5 @@
 def main():
-    print("Hello from resume-generator!")
+    print("Hello from ResuForge!")
 
 
 if __name__ == "__main__":

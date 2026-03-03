@@ -1,5 +1,5 @@
 [project]
-name = "resume-generator"
+name = "resuforge"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"

@@ -152,7 +152,7 @@ wheels = [
 ]
 
 [[package]]
-name = "resume-generator"
+name = "resuforge"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
