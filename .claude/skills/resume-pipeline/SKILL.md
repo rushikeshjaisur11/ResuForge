@@ -49,9 +49,15 @@ Using your understanding of the resume from Step 2 and the jobs from `jobs.json`
 
 ---
 
-## Step 5 — Tailor resume for each top job
+## Step 5 — Tailor resumes in parallel using subagents
 
-For each selected job, do the following:
+Launch **one subagent per top job at the same time** using the Agent tool. Do not wait for one to finish before starting the next — fire all of them in a single parallel batch.
+
+Each subagent receives:
+- The full resume JSON (from Step 2)
+- The job's details: `job_id`, `company`, `title`, `full_jd_text`
+
+Each subagent must independently perform these steps:
 
 ### 5a. Build a rewrite mapping
 
@@ -69,11 +75,12 @@ Include only lines you actually changed.
 
 ### 5b. Save the mapping
 
+Sanitize the company name (spaces → `_`, remove special chars).
+
 Write the mapping JSON to:
 ```
 resumes/{CompanyName}/{job_id}/mapping.json
 ```
-Sanitize the company name for use as a directory (replace spaces with `_`, remove special chars).
 
 ### 5c. Apply the mapping
 
@@ -82,12 +89,16 @@ Run:
 uv run python src/docx_utils.py write resume.docx "resumes/{CompanyName}/{job_id}/resume.docx" "resumes/{CompanyName}/{job_id}/mapping.json"
 ```
 
+Each subagent should return the saved path on success, or an error message on failure.
+
 ---
 
 ## Step 6 — Summary
 
-Print a table:
+Collect results from all subagents, then print a table:
 
 | Rank | Company | Job Title | Saved Path |
 |------|---------|-----------|------------|
 | ...  | ...     | ...       | ...        |
+
+Note any subagents that failed alongside their error.
