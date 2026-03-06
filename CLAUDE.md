@@ -35,7 +35,7 @@ src/
   docx_utils.py        # CLI: read .docx to JSON / write tailored .docx
   linkedin_scraper.py  # Playwright scraper — saves jobs.json
 
-config.json            # job_title, location, top_jobs_count, max_jobs_to_scrape
+config.json            # job_title, location, top_jobs_count, max_jobs_to_scrape, targeted_companies
 .env                   # LINKEDIN_EMAIL, LINKEDIN_PASSWORD
 resume.docx            # Master resume (placed manually)
 resumes/               # Output — auto-created per job
@@ -55,3 +55,20 @@ jobs.json              # Scraper output (intermediate, gitignored)
 - `docx_utils.py read` outputs JSON to stdout; Claude reads it via Bash tool.
 - `docx_utils.py write <src> <out> <mapping.json>` applies the mapping and creates parent dirs automatically.
 - Output path: `resumes/{Company}/{job_id}/resume.docx`; company name sanitized (spaces → `_`).
+- `targeted_companies` in config.json is an **optional** list of company name strings. When non-empty, the scraper
+  will only keep jobs whose scraped company name contains (or is contained by) one of the listed names —
+  case-insensitive substring match. Set to `[]` to scrape all companies (default, no filter).
+  Example: `"targeted_companies": ["Google", "Microsoft", "Thoughtworks"]`
+- `job_freshness` controls how recently jobs must have been posted. Mapped to LinkedIn's `f_TPR` URL parameter.
+  Default: `"24h"`. Valid values:
+
+  | Value | Meaning |
+  |-------|---------|
+  | `"1h"` | Last hour |
+  | `"24h"` / `"1day"` | Last 24 hours (default) |
+  | `"1week"` / `"7days"` | Last 7 days |
+  | `"2weeks"` / `"14days"` | Last 14 days |
+  | `"1month"` / `"30days"` | Last 30 days |
+  | `"any"` | No time filter — all jobs |
+
+  Unknown values fall back to `"24h"` with a printed warning.
