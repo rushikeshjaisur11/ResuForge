@@ -11,6 +11,7 @@ import json
 import os
 import random
 import re
+from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
@@ -28,6 +29,20 @@ FRESHNESS_MAP: dict[str, str] = {
     "1month": "r2592000",
     "30days": "r2592000",
     "any": "",  # no time filter
+}
+
+# Human-readable labels used in the LinkedIn keyword search string
+FRESHNESS_LABEL: dict[str, str] = {
+    "1h": "hour",
+    "24h": "24 hours",
+    "1day": "24 hours",
+    "1week": "week",
+    "7days": "week",
+    "2weeks": "2 weeks",
+    "14days": "2 weeks",
+    "1month": "month",
+    "30days": "month",
+    "any": "",
 }
 
 
@@ -66,10 +81,8 @@ async def _scrape(config: dict, email: str, password: str) -> list:
 
     if targeted_companies:
         print(f"  [filter] Targeting companies: {targeted_companies}")
-    freshness_label = (
-        freshness_raw if freshness_raw.lower() != "any" else "any (no time limit)"
-    )
-    print(f"  [filter] Job freshness: {freshness_label}")
+    freshness_label: str = FRESHNESS_LABEL.get(freshness_raw.lower().strip(), "24 hours")
+    print(f"  [filter] Job freshness: {freshness_raw} ({freshness_label})")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -84,6 +97,10 @@ async def _scrape(config: dict, email: str, password: str) -> list:
         await asyncio.sleep(2)
         await page.fill("#username", email)
         await page.fill("#password", password)
+        # Uncheck "Remember me" if it is checked
+        remember_me = await page.query_selector("#rememberMeOptIn")
+        if remember_me and await remember_me.is_checked():
+            await remember_me.uncheck()
         await page.click('button[type="submit"]')
 
         # Wait up to 60s for post-login navigation — user may need to solve CAPTCHA/verification
@@ -115,7 +132,6 @@ async def _scrape(config: dict, email: str, password: str) -> list:
         if isinstance(titles, str):
             titles = [titles]
         location = config.get("location", "Pune District")
-
         freshness_qs = f"&f_TPR={freshness_param}" if freshness_param else ""
 
         collected = 0
@@ -123,14 +139,21 @@ async def _scrape(config: dict, email: str, password: str) -> list:
             if collected >= max_jobs:
                 break
 
+            # Keywords: "{role} posted in the past {freshness} {location}" — lowercase, + encoded
+            search_term = (
+                f"{title} posted in the past {freshness_label} {location}"
+                if freshness_label
+                else f"{title} {location}"
+            ).lower()
             search_url = (
-                f"https://www.linkedin.com/jobs/search/"
-                f"?keywords={title.replace(' ', '%20')}"
-                f"&location={location.replace(' ', '%20')}"
+                "https://www.linkedin.com/jobs/search/"
+                f"?keywords={quote_plus(search_term)}"
+                f"&location={quote_plus(location)}"
                 f"{freshness_qs}"
-                f"&sortBy=DD"
+                f"&distance=0.0"
+                f"&sortBy=R"
             )
-            print(f"  Searching: '{title}'")
+            print(f"  Searching: '{search_term}'")
             await page.goto(search_url, wait_until="domcontentloaded")
             await asyncio.sleep(3)
 
